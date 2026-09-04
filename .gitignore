@@ -1,0 +1,11 @@
+node_modules/
+*.tsbuildinfo
+*.tgz
+.DS_Store
+*.bak
+*.bak-*
+lib.bak-*/
+dist/
+smoke/
+__pycache__/
+*.pyc

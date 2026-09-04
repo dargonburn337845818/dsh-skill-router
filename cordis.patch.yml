@@ -1,0 +1,4 @@
+# dsh-skill-router bundle layer: insert the skill-router host plugin into the profile.
+- insert:
+    - id: dsh-skill-router
+      name: "@dsh-external/dsh-skill-router"
