@@ -999,6 +999,34 @@ const AI_FLOW_CSS = `
   font-size: 12px;
   line-height: 18px;
 }
+.ai-blackbox-flow .ai-viewer-wrap {
+  margin-top: 12px;
+  border: .5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base, #fff);
+}
+.ai-blackbox-flow .ai-viewer-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: .5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,.02));
+}
+.ai-blackbox-flow .ai-viewer-label {
+  color: var(--dsw-alias-label-secondary, #444951);
+  font-size: 12px;
+}
+.ai-blackbox-flow .ai-viewer-slider {
+  flex: 1;
+}
+.ai-blackbox-flow .ai-viewer-frame {
+  overflow: auto;
+}
+.ai-blackbox-flow .ai-viewer-frame iframe {
+  display: block;
+}
 `
 
 function truncateText(value: string | undefined | null, max = 48): string {
@@ -1531,38 +1559,19 @@ function skinPreset(): string {
   return 'signal-flow'
 }
 
-const CARD_DOTS = ['cyan', 'emerald', 'violet', 'amber', 'rose', 'orange', 'slate']
-
 function buildArchifyWorkflowIR(summary: WorkSummary): any {
   const phases = summary.phases.filter((p) => p.key !== 'goal')
   const lanes: any[] = []
   const nodes: any[] = []
   const edges: any[] = []
-  const cards: any[] = []
   const pushNode = (id: string, label: string): void => {
     lanes.push({ id, label })
     nodes.push({ id, lane: id, col: 0, type: 'backend', label })
   }
-  if (summary.goal) {
-    pushNode('goal', '目标')
-    cards.push({ dot: 'cyan', title: '目标', items: [truncateText(summary.goal, 60)] })
-  }
-  phases.forEach((p, i) => {
-    pushNode(`phase-${p.key}`, p.title)
-    cards.push({
-      dot: CARD_DOTS[i % CARD_DOTS.length],
-      title: p.title,
-      items: (p.engineering?.length ? p.engineering.slice(0, 4) : [engineeringSentence(p)]).filter(Boolean),
-    })
-  })
-  if (summary.lastSummary) {
-    pushNode('summary', '总结')
-    cards.push({ dot: 'slate', title: '总结', items: [truncateText(summary.lastSummary, 60)] })
-  }
-  if (nodes.length === 0) {
-    pushNode('empty', '暂无会话')
-    cards.push({ dot: 'slate', title: '暂无会话', items: ['等待会话完成后生成完整流程图'] })
-  }
+  if (summary.goal) pushNode('goal', '目标')
+  phases.forEach((p) => pushNode(`phase-${p.key}`, p.title))
+  if (summary.lastSummary) pushNode('summary', '总结')
+  if (nodes.length === 0) pushNode('empty', '暂无会话')
   for (let i = 0; i < nodes.length - 1; i++) {
     edges.push({ id: `e${i}`, from: nodes[i].id, to: nodes[i + 1].id })
   }
@@ -1579,7 +1588,6 @@ function buildArchifyWorkflowIR(summary: WorkSummary): any {
     lanes,
     nodes,
     edges,
-    cards,
     mainPath: nodes.map((n) => n.id),
   }
 }
@@ -2058,6 +2066,8 @@ function AiBlackboxFlow(props: any): any {
   const [genState, setGenState] = useState<'idle' | 'busy' | 'error'>('idle')
   const [lastUrl, setLastUrl] = useState('')
   const [genError, setGenError] = useState('')
+  const [zoom, setZoom] = useState(1)
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -2095,10 +2105,11 @@ function AiBlackboxFlow(props: any): any {
       })
       const data = await r.json()
       if (!data.ok) throw new Error(data?.detail || data?.error || '生成失败')
-      setLastUrl(data.url)
       const dark = document.documentElement.classList.contains('dark')
         || document.documentElement.getAttribute('data-theme') === 'dark'
-      window.open(`${data.url}?theme=${dark ? 'dark' : 'light'}`, '_blank')
+      const url = `${data.url}?theme=${dark ? 'dark' : 'light'}`
+      setLastUrl(url)
+      setZoom(1)
       setGenState('idle')
     } catch (e: any) {
       setGenError(String(e?.message ?? e))
@@ -2126,7 +2137,7 @@ function AiBlackboxFlow(props: any): any {
         : createElement('div', { className: 'ai-gen-hint' }, ['会话结束后生成一张可缩放的 Archify 完整图']),
       createElement('div', { className: 'ai-gen-actions' }, [
         lastUrl
-          ? createElement('a', { href: lastUrl, target: '_blank', className: 'ai-stage-link' }, ['查看已生成图'])
+          ? createElement('a', { href: lastUrl, target: '_blank', className: 'ai-stage-link' }, ['新窗口打开'])
           : null,
         createElement('button', {
           className: 'ai-stage-close',
@@ -2138,6 +2149,37 @@ function AiBlackboxFlow(props: any): any {
         ? createElement('div', { className: 'ai-gen-error' }, [genError])
         : null,
     ]),
+    lastUrl
+      ? createElement('div', { className: 'ai-viewer-wrap' }, [
+          createElement('div', { className: 'ai-viewer-toolbar' }, [
+            createElement('span', { className: 'ai-viewer-label' }, ['缩放']),
+            createElement('input', {
+              type: 'range',
+              min: '0.5',
+              max: '3',
+              step: '0.1',
+              value: String(zoom),
+              onChange: (ev: any) => setZoom(Number(ev.target.value)),
+              className: 'ai-viewer-slider',
+            }),
+            createElement('span', { className: 'ai-viewer-label' }, [`${Math.round(zoom * 100)}%`]),
+          ]),
+          createElement('div', { className: 'ai-viewer-frame' }, [
+            createElement('iframe', {
+              ref: iframeRef,
+              src: lastUrl,
+              style: {
+                width: '100%',
+                height: '620px',
+                border: 'none',
+                background: 'var(--dsw-alias-bg-base, #fff)',
+                transform: `scale(${zoom})`,
+                transformOrigin: 'top left',
+              },
+            }),
+          ]),
+        ])
+      : null,
   ])
 }
 
