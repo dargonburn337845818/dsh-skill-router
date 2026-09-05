@@ -6,7 +6,7 @@
  */
 
 export type RouterRoute = 'base' | 'core' | 'dev' | 'domain'
-export type DomainScenario = 'teaching' | 'research' | 'github' | 'dsh-ops' | 'writing'
+export type DomainScenario = 'teaching' | 'learning' | 'research' | 'github' | 'dsh-ops' | 'writing'
 
 export interface RouteDecision {
   route: RouterRoute
@@ -25,6 +25,7 @@ const SEARCH_RE =
 
 const DOMAIN_RE: Array<{ scenario: DomainScenario; re: RegExp }> = [
   { scenario: 'teaching', re: /教师|教学|算法竞赛|拆题|思维题|tourist|jiangly|熵减盘问/i },
+  { scenario: 'learning', re: /(?<!机器|深度|强化)学习|自学|怎么学|如何学|十倍速|10x|ai学习|AI学习|第二大脑|知识管理|笔记|费曼|主动回忆|学习计划|learn|learning|how to learn|study/i },
   { scenario: 'research', re: /论文|组会|科研|vlpc|汇报|学术|物理|报告/i },
   { scenario: 'writing', re: /提示词|prompt|文案|文稿|写作|写报告|写文档|写周报|写总结|演讲稿|ppt文案|去ai味|去AI味|copywriting/i },
   { scenario: 'github', re: /github|开源仓库|release|actions|readme|仓库页|发布/i },
@@ -60,6 +61,7 @@ export function routeLabel(route: string, scenario?: string): string {
   if (route === 'domain') {
     const map: Record<string, string> = {
       teaching: '教学 / 算法竞赛',
+      learning: 'AI 学习 / 自我提升',
       research: '科研 / 论文',
       github: 'GitHub / 开源',
       'dsh-ops': 'DSH 运维 / 插件',

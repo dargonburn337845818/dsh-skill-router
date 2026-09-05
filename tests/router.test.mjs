@@ -55,6 +55,15 @@ test('switch to writing domain enables writing scenario', async () => {
   assert.ok(call.disable.includes('core-iteration'))
 })
 
+test('switch to learning domain enables learning scenario', async () => {
+  const vault = fakeVault(entries)
+  const m = new SkillRouterManager(vault, () => 'sid-7')
+  await m.switch('domain', 'learning')
+  const call = vault.calls.at(-1)
+  assert.ok(call.enable.includes('learning'))
+  assert.ok(call.disable.includes('core-iteration'))
+})
+
 test('status returns route label', async () => {
   const vault = fakeVault(entries)
   const m = new SkillRouterManager(vault, () => 'sid-3')

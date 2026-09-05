@@ -45,7 +45,7 @@ export function registerTools(ctx: Context, manager: SkillRouterManager): void {
       },
       scenario: {
         type: 'string',
-        description: 'domain 时的场景 id：teaching / research / github / dsh-ops / writing。',
+        description: 'domain 时的场景 id：teaching / learning / research / github / dsh-ops / writing。',
       },
     },
     output: {
@@ -69,7 +69,7 @@ export function registerTools(ctx: Context, manager: SkillRouterManager): void {
       const route = args.route as 'base' | 'core' | 'dev' | 'domain'
       const scenario = args.scenario as string | undefined
       if (route === 'domain' && !scenario) {
-        return { ok: false, route, scenario: '', label: '领域', message: 'domain 路由需要提供 scenario：teaching/research/github/dsh-ops/writing' }
+        return { ok: false, route, scenario: '', label: '领域', message: 'domain 路由需要提供 scenario：teaching/learning/research/github/dsh-ops/writing' }
       }
       const decision = await manager.switch(route, scenario)
       const label = decision.route === 'domain' ? `${decision.route}:${decision.scenario || ''}` : decision.route

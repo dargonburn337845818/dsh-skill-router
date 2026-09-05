@@ -10,7 +10,7 @@
 
 - 常驻底座：search-source、work-consensus、dsh-optimization-consensus。
 - 主卡：搜索底座、核心 Skill 迭代、开发/重构。
-- 折叠其他场景：teaching / research / github / dsh-ops。
+- 折叠其他场景：teaching / learning / research / github / dsh-ops。
 
 ## 路由
 

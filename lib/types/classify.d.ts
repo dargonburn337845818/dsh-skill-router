@@ -5,7 +5,7 @@
  * 只做确定性、可测试的文本分类，不调用 LLM。
  */
 export type RouterRoute = 'base' | 'core' | 'dev' | 'domain';
-export type DomainScenario = 'teaching' | 'research' | 'github' | 'dsh-ops' | 'writing';
+export type DomainScenario = 'teaching' | 'learning' | 'research' | 'github' | 'dsh-ops' | 'writing';
 export interface RouteDecision {
     route: RouterRoute;
     scenario?: DomainScenario | string;

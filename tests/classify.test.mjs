@@ -29,6 +29,17 @@ test('classifies writing scenario', () => {
   assert.equal(d.scenario, 'writing')
 })
 
+test('classifies learning scenario', () => {
+  const d = classifyRoute('我想用 AI 十倍速学习，怎么规划第二大脑和主动回忆？')
+  assert.equal(d.route, 'domain')
+  assert.equal(d.scenario, 'learning')
+})
+
+test('does not misroute machine learning to learning scenario', () => {
+  const d = classifyRoute('帮我看看这个机器学习模型的训练脚本')
+  assert.notEqual(d.scenario, 'learning')
+})
+
 test('defaults ambiguous to base', () => {
   const d = classifyRoute('你好')
   assert.equal(d.route, 'base')

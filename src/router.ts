@@ -19,7 +19,7 @@ export interface RouterStatus {
   confidence: string
 }
 
-const DOMAIN_SCENARIOS = ['teaching', 'research', 'github', 'dsh-ops', 'writing']
+const DOMAIN_SCENARIOS = ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing']
 
 export class SkillRouterManager {
   private vault: VaultClient
