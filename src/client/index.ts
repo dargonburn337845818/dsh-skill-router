@@ -1493,6 +1493,31 @@ function buildStageDetail(mapKey: string, stageKey: string, status: string | nul
   return `「${label}」还没有开始。`
 }
 
+function shortPath(p: string): string {
+  const parts = p.split('/').filter(Boolean)
+  return parts.slice(-3).join('/')
+}
+
+function engineeringSentence(phase?: WorkPhase): string {
+  if (!phase?.engineering?.length) return ''
+  const files: string[] = []
+  const commands: string[] = []
+  const ops: string[] = []
+  for (const line of phase.engineering) {
+    if (line.startsWith('修改 ')) files.push(shortPath(line.slice(3)))
+    else if (line.startsWith('执行 ')) commands.push(line.slice(3).split(' ').slice(0, 3).join(' '))
+    else if (line.startsWith('热重载 ') || line.startsWith('构建 ') || line.startsWith('插件装配 ')) ops.push(line)
+    else if (line.startsWith('查看 ') || line.startsWith('工具 ')) ops.push(line)
+  }
+  const unique = (arr: string[]) => [...new Set(arr)]
+  const parts: string[] = []
+  if (files.length) parts.push(`改了 ${unique(files).slice(0, 3).join('、')}`)
+  if (commands.length) parts.push(`执行了 ${unique(commands).slice(0, 3).join('、')}`)
+  if (ops.length) parts.push(unique(ops).slice(0, 3).join('；'))
+  if (!parts.length) return unique(phase.engineering).slice(0, 2).join('；')
+  return parts.join('，') + '。'
+}
+
 interface WorkStage {
   key: string
   label: string
@@ -1834,6 +1859,7 @@ function AiBlackboxFlow(props: any): any {
   const detailText = detailStage && selectedStage
     ? buildStageDetail(mapKey, detailStage, selectedState, summary)
     : ''
+  const engSentence = selectedPhase ? engineeringSentence(selectedPhase) : ''
 
   return createElement('div', { className: 'ai-blackbox-flow' }, [
     createElement('style', { key: 'ai-flow-css' }, [AI_FLOW_CSS]),
@@ -1852,12 +1878,10 @@ function AiBlackboxFlow(props: any): any {
       ? createElement('div', { className: 'ai-summary-card ai-stage-detail' }, [
           createElement('div', { className: 'ai-summary-title' }, [`阶段说明 · ${selectedStage.label}`]),
           createElement('div', { className: 'ai-stage-detail-row' }, [detailText]),
-          selectedPhase?.engineering?.length
+          engSentence
             ? createElement('div', { className: 'ai-eng-block' }, [
-                createElement('div', { className: 'ai-trace-title' }, ['实际动作']),
-                ...selectedPhase.engineering.map((e, i) =>
-                  createElement('div', { key: i, className: 'ai-trace-line' }, ['· ', e]),
-                ),
+                createElement('div', { className: 'ai-trace-title' }, ['这阶段实际做了什么']),
+                createElement('div', { className: 'ai-stage-detail-row' }, [engSentence]),
               ])
             : null,
           createElement('button', {
