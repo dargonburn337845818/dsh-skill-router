@@ -970,6 +970,35 @@ const AI_FLOW_CSS = `
   color: var(--dsw-alias-state-business-primary, #3866b3);
   border-color: var(--dsw-alias-state-business-primary, #3866b3);
 }
+.ai-blackbox-flow .ai-gen-card {
+  margin-top: 12px;
+  padding: 10px;
+  border: .5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,.02));
+}
+.ai-blackbox-flow .ai-gen-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ai-blackbox-flow .ai-gen-hint {
+  color: var(--dsw-alias-label-secondary, #444951);
+  font-size: 12px;
+  line-height: 18px;
+  margin-bottom: 8px;
+}
+.ai-blackbox-flow .ai-gen-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ai-blackbox-flow .ai-gen-error {
+  margin-top: 8px;
+  color: var(--dsw-alias-state-danger-primary, #dc2626);
+  font-size: 12px;
+  line-height: 18px;
+}
 `
 
 function truncateText(value: string | undefined | null, max = 48): string {
@@ -1498,6 +1527,52 @@ function shortPath(p: string): string {
   return parts.slice(-3).join('/')
 }
 
+function skinPreset(): string {
+  return 'signal-flow'
+}
+
+function buildArchifyWorkflowIR(summary: WorkSummary): any {
+  const phases = summary.phases.filter((p) => p.key !== 'goal')
+  const nodes: any[] = []
+  const edges: any[] = []
+  let col = 0
+  const pushNode = (id: string, label: string, sub: string): void => {
+    if (col > 5) return
+    nodes.push({
+      id,
+      lane: 'work',
+      col,
+      type: 'backend',
+      label,
+      ...(sub ? { sublabel: truncateText(sub, 80) } : {}),
+    })
+    col += 1
+  }
+  if (summary.goal) pushNode('goal', '目标', summary.goal)
+  for (const p of phases) pushNode(`phase-${p.key}`, p.title, engineeringSentence(p))
+  if (summary.lastSummary) pushNode('summary', '总结', summary.lastSummary)
+  if (nodes.length === 0) {
+    pushNode('empty', '暂无会话', '等待会话完成后生成完整流程图')
+  }
+  for (let i = 0; i < nodes.length - 1; i++) {
+    edges.push({ id: `e${i}`, from: nodes[i].id, to: nodes[i + 1].id })
+  }
+  return {
+    schema_version: 1,
+    diagram_type: 'workflow',
+    meta: {
+      title: '会话完整流程图',
+      animation: 'none',
+      visual_preset: skinPreset(),
+      quality_profile: 'standard',
+    },
+    lanes: [{ id: 'work', label: '会话工作流' }],
+    nodes,
+    edges,
+    mainPath: nodes.map((n) => n.id),
+  }
+}
+
 function engineeringSentence(phase?: WorkPhase): string {
   if (!phase?.engineering?.length) return ''
   const files: string[] = []
@@ -1969,6 +2044,9 @@ function ArchifyFullFlow({ summary, status }: { summary: WorkSummary; status: an
 function AiBlackboxFlow(props: any): any {
   const useTrajectory = props.useTrajectory
   const [status, setStatus] = useState<any>(null)
+  const [genState, setGenState] = useState<'idle' | 'busy' | 'error'>('idle')
+  const [lastUrl, setLastUrl] = useState('')
+  const [genError, setGenError] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -1993,6 +2071,30 @@ function AiBlackboxFlow(props: any): any {
   const summary = useMemo(() => buildWorkSummary(trajectory, status), [trajectory, status])
   const currentLabel = status?.label || '等待工作流'
 
+  const generate = async (): Promise<void> => {
+    if (genState === 'busy') return
+    setGenState('busy')
+    setGenError('')
+    try {
+      const ir = buildArchifyWorkflowIR(summary)
+      const r = await fetch('/skill-router/archify/api/render', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ir }),
+      })
+      const data = await r.json()
+      if (!data.ok) throw new Error(data?.detail || data?.error || '生成失败')
+      setLastUrl(data.url)
+      const dark = document.documentElement.classList.contains('dark')
+        || document.documentElement.getAttribute('data-theme') === 'dark'
+      window.open(`${data.url}?theme=${dark ? 'dark' : 'light'}`, '_blank')
+      setGenState('idle')
+    } catch (e: any) {
+      setGenError(String(e?.message ?? e))
+      setGenState('error')
+    }
+  }
+
   return createElement('div', { className: 'ai-blackbox-flow' }, [
     createElement('style', { key: 'ai-flow-css' }, [AI_FLOW_CSS]),
     createElement('div', { className: 'ai-flow-head' }, [
@@ -2006,6 +2108,25 @@ function AiBlackboxFlow(props: any): any {
       ]),
     ]),
     ArchifyFullFlow({ summary, status }),
+    createElement('div', { className: 'ai-gen-card' }, [
+      createElement('div', { className: 'ai-gen-title' }, ['Archify 完整图']),
+      summary.running.length === 0 && summary.totalTools > 0
+        ? createElement('div', { className: 'ai-gen-hint' }, ['会话已结束，可以生成完整流程图'])
+        : createElement('div', { className: 'ai-gen-hint' }, ['会话结束后生成一张可缩放的 Archify 完整图']),
+      createElement('div', { className: 'ai-gen-actions' }, [
+        lastUrl
+          ? createElement('a', { href: lastUrl, target: '_blank', className: 'ai-stage-link' }, ['查看已生成图'])
+          : null,
+        createElement('button', {
+          className: 'ai-stage-close',
+          disabled: genState === 'busy',
+          onClick: () => void generate(),
+        }, [genState === 'busy' ? '生成中…' : '生成 Archify 完整图']),
+      ]),
+      genError
+        ? createElement('div', { className: 'ai-gen-error' }, [genError])
+        : null,
+    ]),
   ])
 }
 
