@@ -1406,6 +1406,32 @@ function buildNarrative(summary: WorkSummary): string {
   return parts.join('').replace(/^(:|，)/, '')
 }
 
+function buildStageDetail(mapKey: string, stageKey: string, status: string | null, summary: WorkSummary): string {
+  const stage = (WORK_MAPS[mapKey]?.stages ?? []).find((s) => s.key === stageKey)
+  const label = stage?.label ?? stageKey
+  const phaseKey = STAGE_PHASE[mapKey]?.[stageKey] ?? ''
+  const phase = summary.phases.find((p) => p.key === phaseKey)
+  const parts: string[] = []
+
+  if (status === 'active') parts.push(`当前正在「${label}」。`)
+  else if (status === 'done') parts.push(`「${label}」已经完成。`)
+  else parts.push(`「${label}」还没有开始。`)
+
+  const base = STAGE_NARRATIVE[mapKey]?.[stageKey]
+  if (base) parts.push(base)
+
+  if (phase?.count) {
+    parts.push(`这一阶段在当前会话里积累了 ${phase.count} 次实际推进。`)
+    if (phase.files?.length) parts.push(`主要落在：${phase.files.slice(0, 4).join('、')}。`)
+  }
+
+  if (summary.lastSummary && (stageKey === 'deliver' || stageKey === 'answer' || stageKey === 'publish')) {
+    parts.push(`最近的结论：${summary.lastSummary}`)
+  }
+
+  return parts.join(' ')
+}
+
 interface WorkStage {
   key: string
   label: string
@@ -1745,11 +1771,7 @@ function AiBlackboxFlow(props: any): any {
   const selectedPhase = summary.phases.find((p) => p.key === selectedPhaseKey)
 
   const detailText = detailStage && selectedStage
-    ? selectedState === 'active'
-      ? `当前正在「${selectedStage.label}」，工作已经推进到这里。${selectedPhase?.count ? `这一阶段共有 ${selectedPhase.count} 次实际动作。` : ''}`
-      : selectedState === 'done'
-        ? `「${selectedStage.label}」这一步已完成。`
-        : `「${selectedStage.label}」这一步还未开始。`
+    ? buildStageDetail(mapKey, detailStage, selectedState, summary)
     : ''
 
   return createElement('div', { className: 'ai-blackbox-flow' }, [
