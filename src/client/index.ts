@@ -930,7 +930,8 @@ const AI_FLOW_CSS = `
   margin: 3px 0;
   word-break: break-all;
 }
-.ai-blackbox-flow .ai-trace-block {
+.ai-blackbox-flow .ai-trace-block,
+.ai-blackbox-flow .ai-eng-block {
   margin-top: 8px;
   padding-top: 6px;
   border-top: .5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
@@ -1221,6 +1222,7 @@ interface WorkPhase {
   files?: string[]
   callIds?: string[]
   trace?: string[]
+  engineering?: string[]
   active: boolean
 }
 
@@ -1302,15 +1304,89 @@ function traceLine(n: any): string | null {
   return null
 }
 
+function argField(n: any, field: string): string {
+  const raw = n.call?.argsRaw ?? ''
+  if (!raw) return ''
+  try {
+    const obj = JSON.parse(raw)
+    if (obj && typeof obj[field] === 'string') return obj[field]
+    if (obj && Array.isArray(obj[field])) return obj[field].join(' ')
+    if (obj && typeof obj[field] === 'object') return JSON.stringify(obj[field])
+  } catch {
+    return raw
+  }
+  return ''
+}
+
+function fileArg(n: any): string {
+  const raw = n.call?.argsRaw ?? ''
+  const re = /"(?:file_path|path|file|files|target|outputPath|out)"\s*:\s*"([^"]+)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(raw)) !== null) {
+    const p = m[1]
+    if (p && !p.startsWith('node:') && !p.startsWith('http')) return p
+  }
+  return ''
+}
+
+function engineeringLine(n: any): string | null {
+  if (n.kind === 'command') {
+    const name = n.name ?? 'command'
+    const args = n.args ? ` ${truncateText(n.args, 48)}` : ''
+    return `执行命令 ${name}${args}`
+  }
+  if (n.kind !== 'tool-result') return null
+  const name = n.call?.name ?? 'tool'
+  const lname = name.toLowerCase()
+  const path = fileArg(n)
+  if (lname === 'write' || lname === 'edit' || lname.includes('str_replace')) {
+    return path ? `修改 ${path}` : `修改内容（${name}）`
+  }
+  if (lname === 'bash') {
+    const cmd = argField(n, 'command') || argField(n, 'cmd') || name
+    return `执行 ${truncateText(cmd, 64)}`
+  }
+  if (lname === 'dev_reload_package') {
+    const target = argField(n, 'packageName') || argField(n, 'match')
+    return target ? `热重载 ${target}` : '热重载插件'
+  }
+  if (lname === 'dev_build_plugin') {
+    const dir = argField(n, 'dir')
+    return dir ? `构建 ${dir}` : '构建插件'
+  }
+  if (lname === 'dev_install_package' || lname === 'dev_inject_plugin' || lname === 'dev_uninject_plugin') {
+    const target = argField(n, 'dir') || argField(n, 'match')
+    return target ? `插件装配 ${target}` : '插件装配'
+  }
+  if (lname === 'web_search') {
+    const q = argField(n, 'queries')
+    return `搜索 ${truncateText(q || rawDisplay(n), 64)}`
+  }
+  if (lname === 'read' || lname === 'glob' || lname === 'grep' || lname === 'cat' || lname === 'ls' || lname === 'find') {
+    const target = path || argField(n, 'pattern') || argField(n, 'path')
+    return `查看 ${truncateText(target || name, 64)}`
+  }
+  if (lname === 'git' || lname === 'npm' || lname === 'node' || lname === 'python' || lname === 'tsc' || lname === 'pnpm') {
+    return `执行 ${name} ${truncateText(rawDisplay(n), 48)}`
+  }
+  if (name.startsWith('dev_')) return `插件操作 ${name}`
+  return `工具 ${name}`
+}
+
+function rawDisplay(n: any): string {
+  const raw = n.call?.argsRaw ?? ''
+  return raw.startsWith('{') ? JSON.stringify(JSON.parse(raw)) : raw
+}
+
 function buildWorkSummary(trajectory: any, status: any): WorkSummary {
   const nodes = trajectory?.eventNodes ?? []
   const goalNode = [...nodes].reverse().find((n: any) => n.kind === 'user')
   const lastAssistant = [...nodes].reverse().find((n: any) => n.kind === 'assistant' && nodeText(n))
-  const phaseInfo: Record<string, { count: number; tools: Map<string, number>; callIds: string[]; trace: string[] }> = {
-    research: { count: 0, tools: new Map(), callIds: [], trace: [] },
-    build: { count: 0, tools: new Map(), callIds: [], trace: [] },
-    verify: { count: 0, tools: new Map(), callIds: [], trace: [] },
-    deliver: { count: 0, tools: new Map(), callIds: [], trace: [] },
+  const phaseInfo: Record<string, { count: number; tools: Map<string, number>; callIds: string[]; trace: string[]; engineering: string[] }> = {
+    research: { count: 0, tools: new Map(), callIds: [], trace: [], engineering: [] },
+    build: { count: 0, tools: new Map(), callIds: [], trace: [], engineering: [] },
+    verify: { count: 0, tools: new Map(), callIds: [], trace: [], engineering: [] },
+    deliver: { count: 0, tools: new Map(), callIds: [], trace: [], engineering: [] },
   }
   let activePhase = 'goal'
 
@@ -1326,6 +1402,8 @@ function buildWorkSummary(trajectory: any, status: any): WorkSummary {
       if (cid) phaseInfo[phase].callIds.push(cid)
       const line = traceLine(n)
       if (line) phaseInfo[phase].trace.push(line)
+      const eng = engineeringLine(n)
+      if (eng) phaseInfo[phase].engineering.push(eng)
       activePhase = phase
     }
   }
@@ -1350,6 +1428,7 @@ function buildWorkSummary(trajectory: any, status: any): WorkSummary {
         files: key === 'build' ? changedFiles : undefined,
         callIds: info.callIds,
         trace: info.trace.slice(-10),
+        engineering: info.engineering.slice(-12),
         active: activePhase === key,
       })
     }
@@ -1409,27 +1488,9 @@ function buildNarrative(summary: WorkSummary): string {
 function buildStageDetail(mapKey: string, stageKey: string, status: string | null, summary: WorkSummary): string {
   const stage = (WORK_MAPS[mapKey]?.stages ?? []).find((s) => s.key === stageKey)
   const label = stage?.label ?? stageKey
-  const phaseKey = STAGE_PHASE[mapKey]?.[stageKey] ?? ''
-  const phase = summary.phases.find((p) => p.key === phaseKey)
-  const parts: string[] = []
-
-  if (status === 'active') parts.push(`当前正在「${label}」。`)
-  else if (status === 'done') parts.push(`「${label}」已经完成。`)
-  else parts.push(`「${label}」还没有开始。`)
-
-  const base = STAGE_NARRATIVE[mapKey]?.[stageKey]
-  if (base) parts.push(base)
-
-  if (phase?.count) {
-    parts.push(`这一阶段在当前会话里积累了 ${phase.count} 次实际推进。`)
-    if (phase.files?.length) parts.push(`主要落在：${phase.files.slice(0, 4).join('、')}。`)
-  }
-
-  if (summary.lastSummary && (stageKey === 'deliver' || stageKey === 'answer' || stageKey === 'publish')) {
-    parts.push(`最近的结论：${summary.lastSummary}`)
-  }
-
-  return parts.join(' ')
+  if (status === 'active') return `当前正在「${label}」，下面列出这一阶段实际发生的动作。`
+  if (status === 'done') return `「${label}」已经完成，下面列出这一阶段实际发生的动作。`
+  return `「${label}」还没有开始。`
 }
 
 interface WorkStage {
@@ -1791,6 +1852,14 @@ function AiBlackboxFlow(props: any): any {
       ? createElement('div', { className: 'ai-summary-card ai-stage-detail' }, [
           createElement('div', { className: 'ai-summary-title' }, [`阶段说明 · ${selectedStage.label}`]),
           createElement('div', { className: 'ai-stage-detail-row' }, [detailText]),
+          selectedPhase?.engineering?.length
+            ? createElement('div', { className: 'ai-eng-block' }, [
+                createElement('div', { className: 'ai-trace-title' }, ['实际动作']),
+                ...selectedPhase.engineering.map((e, i) =>
+                  createElement('div', { key: i, className: 'ai-trace-line' }, ['· ', e]),
+                ),
+              ])
+            : null,
           createElement('button', {
             className: 'ai-stage-close',
             onClick: () => setDetailStage(null),
