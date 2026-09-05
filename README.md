@@ -15,6 +15,7 @@ dsh-skill-router 是 DSH（DeepSeek Harness）生态中的路由插件，与 `ds
 - **技能推荐**：`skill_suggest` 返回当前或指定工作流下的推荐 skill。
 - **开发约束**：开发/重构模式下强制先调用 `commit_star` 激活 `dsh-graded-mode`，再注入开发规范与路径手册。
 - **过程监视器**：注入 `conversation.view` 槽位，展示当前工作流、已启用 skill、推荐 skill，以及教师/科研模式的专家讨论轨迹。
+- **AI 黑盒趋势**：同一视图栏新增“AI 黑盒趋势”标签，用实时流程图展示当前会话的工具/阶段/命令/异常；数据来自 Trajectory，不生成静态 HTML。
 
 ## 依赖
 

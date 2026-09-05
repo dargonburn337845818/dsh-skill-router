@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const src = readFileSync(resolve(root, 'lib/client/index.js'), 'utf8')
 
-let code = src.replace("import { createElement, useEffect, useRef } from 'react';", "const { createElement, useEffect, useRef } = require('react');")
+let code = src.replace("import { createElement, useEffect, useMemo, useRef, useState } from 'react';", "const { createElement, useEffect, useMemo, useRef, useState } = require('react');")
 code = code.replace("export const inject = ['slots'];", "const inject = ['slots'];")
 code = code.replace("export function apply(ctx)", "function apply(ctx)")
 
