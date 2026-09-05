@@ -17,11 +17,16 @@ export interface RouterStatus {
     suggested: string[];
     confidence: string;
 }
+export declare const DOMAIN_SCENARIOS: readonly ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing'];
 export declare class SkillRouterManager {
     private vault;
     private getSessionId;
     private routes;
     private cache;
+    private catalogPromise;
+    private catalogPromiseGeneration;
+    private catalogGeneration;
+    private catalogLoadedAt;
     constructor(vault: VaultClient, getSessionId: () => string | undefined);
     ensureRoute(text: string, sessionId?: string): Promise<RouteDecision>;
     switch(route: RouterRoute, scenario?: string, sessionId?: string): Promise<RouteDecision>;
@@ -31,6 +36,8 @@ export declare class SkillRouterManager {
         routeText: string;
         devSpec?: string;
     }>;
+    /** 会话结束/清理时移除该会话路由；路由表本身也会按 TTL 淘汰。 */
+    disposeSession(sessionId: string | undefined): void;
     private applyDecision;
     /** One-time reset to base-only global enabled state. */
     resetBase(): Promise<{
@@ -38,6 +45,9 @@ export declare class SkillRouterManager {
         baseIds: string[];
     }>;
     private getCatalog;
+    private invalidateCatalog;
+    private getRoute;
+    private setRoute;
     private suggestedFor;
 }
 /**

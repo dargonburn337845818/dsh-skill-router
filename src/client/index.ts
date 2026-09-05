@@ -2,7 +2,7 @@
  * @dsh-external/dsh-skill-router — 过程监视器。
  *
  * 顶部显示当前模式/进程；中间是调用链；
- * 教师/科研模式显示专家讨论流。教师模式优先读取 vault 的 /teacher/status 真实轨迹，失败时回退占位数据。
+ * 教师/科研模式显示专家讨论流。数据来源于 vault 的 /teacher/status 与 /skill-router/api/status，不做假数据兜底。
  */
 import { createElement, useEffect, useRef } from 'react'
 
@@ -38,19 +38,6 @@ const MODES = [
   { id: 'research', label: '科研' },
   { id: 'writing', label: '文稿' },
   { id: 'domain', label: '领域' },
-]
-
-const MOCK_TRACE = [
-  { time: '20:01', actor: '路由', action: '识别领域：算法竞赛 → 教师模式', status: 'done' },
-  { time: '20:02', actor: '领域专家库', action: '匹配 Tourist / jiangly', status: 'done' },
-  { time: '20:03', actor: 'Tourist', action: '提出分支 A：先证单调性', status: 'done' },
-  { time: '20:04', actor: 'jiangly', action: '指出边界：离散情况不适用', status: 'adjudicated' },
-]
-
-const MOCK_DISCUSSION = [
-  { round: 1, expert: 'Tourist', stance: '先做最简判定，再构造', verdict: '采纳' },
-  { round: 1, expert: 'jiangly', stance: '注意反例与边界', verdict: '参考' },
-  { round: 2, expert: '工程导师', stance: '用测试锁住接口', verdict: '采纳' },
 ]
 
 const PANEL_CLASS = 'dsh-skill-router-monitor'
@@ -415,7 +402,7 @@ function buildTrace(data?: MonitorData): Array<{ time: string; actor: string; ac
     }
     return trace
   }
-  return [...MOCK_TRACE]
+  return []
 }
 
 function modeFromRouter(router?: MonitorRouterStatus | null): string {
@@ -433,23 +420,7 @@ function modeFromRouter(router?: MonitorRouterStatus | null): string {
 
 function buildDiscussion(data?: MonitorData): Array<{ round: number; expert: string; stance: string; verdict: string }> {
   const s = data?.teacher?.current
-  if (!s) {
-    const mode = modeFromRouter(data?.router)
-    if (mode === 'teacher' || mode === 'research') {
-      return [{
-        round: 0,
-        expert: '教师会话',
-        stance: '尚无讨论轮次；调用 teacher_discussion_start / teacher_discussion_round 开始。',
-        verdict: '待开始',
-      }]
-    }
-    return [{
-      round: 0,
-      expert: '过程监视器',
-      stance: '当前模式无专家讨论；调用链显示工作流与技能状态。',
-      verdict: '示意',
-    }]
-  }
+  if (!s) return []
   if (s.discussion?.status === 'expert_gap') {
     return [{
       round: 0,
@@ -592,8 +563,8 @@ function createMonitorPanel(data?: MonitorData): { render(): HTMLElement } {
       const note = current
         ? '教师讨论流来自 /skill-vault/api/teacher/status（只读展示）。'
         : router?.label
-          ? '当前数据来自 /skill-router/api/status 与 /skill-vault/api/teacher/status；专家讨论为占位/待接入。'
-          : '以下为示例调用链与专家讨论；真实轨迹接入后自动替换。'
+          ? '当前数据来自 /skill-router/api/status；教师讨论仅在教师会话数据返回后展示。'
+          : '暂无路由状态数据（未返回真实轨迹）。'
       root.append(body, el('p', 'dsh-monitor-note', note))
 
       return root
@@ -601,8 +572,8 @@ function createMonitorPanel(data?: MonitorData): { render(): HTMLElement } {
   }
 }
 
-async function fetchJson(url: string): Promise<any> {
-  const res = await fetch(url, { headers: { accept: 'application/json' } })
+async function fetchJson(url: string, signal?: AbortSignal): Promise<any> {
+  const res = await fetch(url, { headers: { accept: 'application/json' }, signal })
   if (!res.ok) throw new Error(`${url} ${res.status}`)
   return await res.json()
 }
@@ -614,22 +585,63 @@ function SkillRouterPanelComponent(): any {
     const container = hostRef.current
     if (!container) return
     let cancelled = false
+    let timer: ReturnType<typeof setInterval> | undefined
+    let currentAbort: AbortController | null = null
+    let refreshing = false
+
     const render = (data?: MonitorData): void => {
       if (cancelled) return
       container.replaceChildren(createMonitorPanel(data).render())
     }
+
     const refresh = async (): Promise<void> => {
-      const [router, teacher] = await Promise.all([
-        fetchJson('/skill-router/api/status').catch(() => null),
-        fetchJson('/skill-vault/api/teacher/status').catch(() => null),
-      ])
-      render({ router, teacher })
+      if (cancelled || refreshing || document.visibilityState === 'hidden') return
+      refreshing = true
+      currentAbort?.abort()
+      const controller = new AbortController()
+      currentAbort = controller
+      try {
+        const [router, teacher] = await Promise.all([
+          fetchJson('/skill-router/api/status', controller.signal).catch(() => null),
+          fetchJson('/skill-vault/api/teacher/status', controller.signal).catch(() => null),
+        ])
+        if (!cancelled && !controller.signal.aborted) render({ router, teacher })
+      } catch {
+        // Abort/network errors: keep the last rendered state.
+      } finally {
+        if (currentAbort === controller) currentAbort = null
+        refreshing = false
+      }
     }
+
+    const startTimer = (): void => {
+      if (!timer) timer = setInterval(() => void refresh(), 5000)
+    }
+    const stopTimer = (): void => {
+      if (timer) {
+        clearInterval(timer)
+        timer = undefined
+      }
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') {
+        stopTimer()
+        currentAbort?.abort()
+      } else {
+        startTimer()
+        void refresh()
+      }
+    }
+
     void refresh()
-    const timer = setInterval(() => void refresh(), 5000)
+    if (document.visibilityState !== 'hidden') startTimer()
+    document.addEventListener('visibilitychange', onVisibility)
+
     return () => {
       cancelled = true
-      clearInterval(timer)
+      stopTimer()
+      currentAbort?.abort()
+      document.removeEventListener('visibilitychange', onVisibility)
       if (container.isConnected) container.replaceChildren()
     }
   }, [])

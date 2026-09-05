@@ -19,13 +19,25 @@ export interface RouterStatus {
   confidence: string
 }
 
-const DOMAIN_SCENARIOS = ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing']
+export const DOMAIN_SCENARIOS = ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing'] as const
+
+const ROUTE_TTL_MS = 60 * 60 * 1000
+const CATALOG_TTL_MS = 15_000
+
+interface RouteEntry {
+  decision: RouteDecision
+  at: number
+}
 
 export class SkillRouterManager {
   private vault: VaultClient
   private getSessionId: () => string | undefined
-  private routes = new Map<string, RouteDecision>()
+  private routes = new Map<string, RouteEntry>()
   private cache: VaultApiList | null = null
+  private catalogPromise: Promise<VaultApiList> | null = null
+  private catalogPromiseGeneration = -1
+  private catalogGeneration = 0
+  private catalogLoadedAt = 0
 
   constructor(vault: VaultClient, getSessionId: () => string | undefined) {
     this.vault = vault
@@ -34,7 +46,8 @@ export class SkillRouterManager {
 
   async ensureRoute(text: string, sessionId?: string): Promise<RouteDecision> {
     const sid = sessionId || this.getSessionId()
-    if (sid && this.routes.has(sid)) return this.routes.get(sid)!
+    const existing = sid ? this.getRoute(sid) : undefined
+    if (existing) return existing
     const decision = classifyRoute(text)
     await this.applyDecision(decision, sid)
     return decision
@@ -49,7 +62,7 @@ export class SkillRouterManager {
 
   async status(sessionId?: string): Promise<RouterStatus> {
     const sid = sessionId || this.getSessionId()
-    const decision = sid ? this.routes.get(sid) : undefined
+    const decision = sid ? this.getRoute(sid) : undefined
     const route = decision?.route || 'base'
     const scenario = decision?.scenario
     const catalog = await this.getCatalog()
@@ -68,7 +81,7 @@ export class SkillRouterManager {
 
   async suggested(route?: RouterRoute, scenario?: string, sessionId?: string): Promise<string[]> {
     const sid = sessionId || this.getSessionId()
-    const decision = sid ? this.routes.get(sid) : undefined
+    const decision = sid ? this.getRoute(sid) : undefined
     const r = route || decision?.route || 'base'
     const s = scenario || decision?.scenario
     const catalog = await this.getCatalog()
@@ -86,6 +99,12 @@ export class SkillRouterManager {
       routeText: lines.join('\n'),
       devSpec: status.route === 'dev' ? DEV_SPEC : undefined,
     }
+  }
+
+  /** 会话结束/清理时移除该会话路由；路由表本身也会按 TTL 淘汰。 */
+  disposeSession(sessionId: string | undefined): void {
+    if (!sessionId) return
+    this.routes.delete(sessionId)
   }
 
   private async applyDecision(decision: RouteDecision, sessionId?: string): Promise<void> {
@@ -115,9 +134,9 @@ export class SkillRouterManager {
     await this.vault.route([...enable], [...disable], 'session')
 
     if (sessionId) {
-      this.routes.set(sessionId, decision)
+      this.setRoute(sessionId, decision)
     }
-    this.cache = null
+    this.invalidateCatalog()
   }
 
   /** One-time reset to base-only global enabled state. */
@@ -129,8 +148,51 @@ export class SkillRouterManager {
   }
 
   private async getCatalog(): Promise<VaultApiList> {
-    if (!this.cache) this.cache = await this.vault.list()
-    return this.cache
+    // in-flight 去重：并发读只发一次 HTTP；若已因写操作失效则不再复用旧请求。
+    if (this.catalogPromise && this.catalogPromiseGeneration === this.catalogGeneration) return this.catalogPromise
+    // 短 TTL 缓存：避免高频 status/suggested 反复请求 vault 目录。
+    const now = Date.now()
+    if (this.cache && now - this.catalogLoadedAt < CATALOG_TTL_MS) return this.cache
+
+    const p = this.vault.list()
+    const gen = this.catalogGeneration
+    this.catalogPromise = p
+    this.catalogPromiseGeneration = gen
+    try {
+      const data = await p
+      // 请求期间发生写操作（catalogGeneration 变化）时，不把过期数据写回缓存。
+      if (this.catalogGeneration === gen) {
+        this.cache = data
+        this.catalogLoadedAt = now
+      }
+      return data
+    } finally {
+      if (this.catalogPromise === p) {
+        this.catalogPromise = null
+        this.catalogPromiseGeneration = -1
+      }
+    }
+  }
+
+  private invalidateCatalog(): void {
+    this.cache = null
+    this.catalogLoadedAt = 0
+    this.catalogGeneration++
+  }
+
+  private getRoute(sid: string): RouteDecision | undefined {
+    const now = Date.now()
+    for (const [key, entry] of this.routes) {
+      if (now - entry.at > ROUTE_TTL_MS) this.routes.delete(key)
+    }
+    const entry = this.routes.get(sid)
+    if (!entry) return undefined
+    entry.at = now
+    return entry.decision
+  }
+
+  private setRoute(sid: string, decision: RouteDecision): void {
+    this.routes.set(sid, { decision, at: Date.now() })
   }
 
   private suggestedFor(route: RouterRoute, scenario: string | undefined, catalog: VaultApiList): string[] {

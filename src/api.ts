@@ -7,7 +7,16 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
-import type { SkillRouterManager } from './router.js'
+import { DOMAIN_SCENARIOS, type SkillRouterManager } from './router.js'
+
+const MAX_BODY_BYTES = 256 * 1024
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'HttpError'
+  }
+}
 
 export function registerApi(ctx: Context, manager: SkillRouterManager): void {
   const webserver = ctx.get('webServer') as { register(opts: unknown): unknown } | undefined
@@ -15,7 +24,16 @@ export function registerApi(ctx: Context, manager: SkillRouterManager): void {
 
   const readBody = async (req: IncomingMessage): Promise<string> => {
     const chunks: Buffer[] = []
-    for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+    let total = 0
+    for await (const chunk of req) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+      total += buf.length
+      if (total > MAX_BODY_BYTES) {
+        req.destroy()
+        throw new HttpError(413, 'request body too large (max 256KB)')
+      }
+      chunks.push(buf)
+    }
     return Buffer.concat(chunks).toString('utf8')
   }
 
@@ -37,16 +55,42 @@ export function registerApi(ctx: Context, manager: SkillRouterManager): void {
           return send(res, 200, { ok: true, ...await manager.status(sid) })
         }
         if (req.method === 'POST' && path === '/switch') {
-          const body = JSON.parse(await readBody(req)) as { route?: string; scenario?: string }
-          const route = body.route
-          if (route !== 'base' && route !== 'core' && route !== 'dev' && route !== 'domain') {
+          let raw: string
+          try {
+            raw = await readBody(req)
+          } catch (e) {
+            if (e instanceof HttpError) return send(res, e.status, { ok: false, error: e.message })
+            throw e
+          }
+          let body: { route?: unknown; scenario?: unknown } | null
+          try {
+            body = JSON.parse(raw) as { route?: unknown; scenario?: unknown }
+          } catch {
+            return send(res, 400, { ok: false, error: 'invalid JSON body' })
+          }
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return send(res, 400, { ok: false, error: 'body must be a JSON object' })
+          }
+
+          const route = body.route as string | undefined
+          if (!route || (route !== 'base' && route !== 'core' && route !== 'dev' && route !== 'domain')) {
             return send(res, 400, { ok: false, error: 'route 必须是 base/core/dev/domain' })
           }
-          const decision = await manager.switch(route, body.scenario, sid)
+
+          const scenario = typeof body.scenario === 'string' && body.scenario.trim() ? body.scenario.trim() : undefined
+          if (scenario && !(DOMAIN_SCENARIOS as readonly string[]).includes(scenario)) {
+            return send(res, 400, { ok: false, error: `scenario 必须是 ${DOMAIN_SCENARIOS.join('/')} 之一` })
+          }
+          if (route === 'domain' && !scenario) {
+            return send(res, 400, { ok: false, error: 'domain 路由需要提供 scenario' })
+          }
+
+          const decision = await manager.switch(route, scenario, sid)
           return send(res, 200, { ok: true, decision })
         }
         return send(res, 404, { ok: false, error: 'not found: ' + path })
       } catch (e) {
+        if (e instanceof HttpError) return send(res, e.status, { ok: false, error: e.message })
         return send(res, 500, { ok: false, error: String(e) })
       }
     },

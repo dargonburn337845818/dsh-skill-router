@@ -4,8 +4,9 @@
  * 只通过 HTTP 调用 vault 的公开端点，不直接读写 vault 文件/状态，
  * 保持两个插件松耦合（用户已确认“调度器走 vault 公开 API”）。
  *
- * 本客户端带“基底发现”：explicit config > DSH_WEB_URL > 常见本地端口，
- * 第一次请求失败时会自动尝试下一个候选，直到找到可用的 vault API。
+ * 本客户端带“基底发现”：explicit config > DSH_WEB_URL > 常见本地端口。
+ * 读操作（GET）可以逐候选尝试直到找到可用的 vault API；
+ * 写操作（POST）只允许发给“已确认 base”（成功 GET 后固定），避免副作用被重放到错误实例。
  */
 export interface VaultApiRow {
     id: string;
@@ -74,6 +75,8 @@ export interface VaultTeacherStatus {
 export declare class VaultClient {
     private base;
     private candidates;
+    private confirmedBase;
+    private writeCache;
     constructor(base?: string);
     list(): Promise<VaultApiList>;
     route(enable: string[], disable: string[], scope?: 'session' | 'global'): Promise<{
@@ -84,5 +87,13 @@ export declare class VaultClient {
         ok: boolean;
     }>;
     teacherStatus(sessionId?: string): Promise<VaultTeacherStatus>;
-    private requestJson;
+    /** Read-only request: tries every candidate, then pins the first reachable base. */
+    private getJson;
+    /** Write request: only uses a base confirmed by a successful GET, and dedupes identical writes. */
+    private postJson;
+    private fetchJson;
+    private assertWriteOk;
+    private discoveryCandidates;
+    private confirmBase;
+    private pruneWriteCache;
 }

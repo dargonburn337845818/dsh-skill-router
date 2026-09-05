@@ -90,3 +90,31 @@ test('status keeps scenario and remains lossless JSON', async () => {
   assert.equal(status.scenario, 'teaching')
   assert.deepEqual(status, JSON.parse(JSON.stringify(status)))
 })
+
+test('catalog reads are deduped while in flight', async () => {
+  let listCalls = 0
+  let resolveList
+  const vault = {
+    list() {
+      listCalls++
+      return new Promise((resolve) => { resolveList = resolve })
+    },
+    async route() { return { ok: true, results: [] } },
+    async resetBase() { return { ok: true } },
+  }
+  const m = new SkillRouterManager(vault, () => 'sid-dedupe')
+  const p1 = m.status('sid-dedupe')
+  const p2 = m.status('sid-dedupe')
+  resolveList({ entries, scenarios: [] })
+  await Promise.all([p1, p2])
+  assert.equal(listCalls, 1)
+})
+
+test('disposeSession removes the session route', async () => {
+  const vault = fakeVault(entries)
+  const m = new SkillRouterManager(vault, () => 'sid-dispose')
+  await m.switch('core', undefined, 'sid-dispose')
+  m.disposeSession('sid-dispose')
+  const status = await m.status('sid-dispose')
+  assert.equal(status.route, 'base')
+})
