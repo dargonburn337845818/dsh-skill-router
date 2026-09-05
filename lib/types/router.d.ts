@@ -8,6 +8,7 @@
  */
 import { type RouteDecision, type RouterRoute } from './classify.js';
 import type { VaultClient } from './vault-client.js';
+import { type EffectMetricsRow } from './effects.js';
 export interface RouterStatus {
     sessionId?: string;
     route: RouterRoute;
@@ -15,19 +16,21 @@ export interface RouterStatus {
     label: string;
     enabled: string[];
     suggested: string[];
+    demoted: string[];
     confidence: string;
 }
 export declare const DOMAIN_SCENARIOS: readonly ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing'];
 export declare class SkillRouterManager {
     private vault;
     private getSessionId;
+    private effectProvider;
     private routes;
     private cache;
     private catalogPromise;
     private catalogPromiseGeneration;
     private catalogGeneration;
     private catalogLoadedAt;
-    constructor(vault: VaultClient, getSessionId: () => string | undefined);
+    constructor(vault: VaultClient, getSessionId: () => string | undefined, effectProvider?: () => EffectMetricsRow[]);
     ensureRoute(text: string, sessionId?: string): Promise<RouteDecision>;
     switch(route: RouterRoute, scenario?: string, sessionId?: string): Promise<RouteDecision>;
     status(sessionId?: string): Promise<RouterStatus>;
@@ -39,6 +42,8 @@ export declare class SkillRouterManager {
     /** 会话结束/清理时移除该会话路由；路由表本身也会按 TTL 淘汰。 */
     disposeSession(sessionId: string | undefined): void;
     private applyDecision;
+    /** Skills currently demoted by the effect sensor (negative evidence). */
+    private demotedIds;
     /** One-time reset to base-only global enabled state. */
     resetBase(): Promise<{
         ok: boolean;

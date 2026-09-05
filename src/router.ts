@@ -8,6 +8,7 @@
  */
 import { classifyRoute, routeLabel, type RouteDecision, type RouterRoute } from './classify.js'
 import type { VaultApiList, VaultClient } from './vault-client.js'
+import { demotedSkillIds, loadEffectMetrics, type EffectMetricsRow } from './effects.js'
 
 export interface RouterStatus {
   sessionId?: string
@@ -16,6 +17,7 @@ export interface RouterStatus {
   label: string
   enabled: string[]
   suggested: string[]
+  demoted: string[]
   confidence: string
 }
 
@@ -32,6 +34,7 @@ interface RouteEntry {
 export class SkillRouterManager {
   private vault: VaultClient
   private getSessionId: () => string | undefined
+  private effectProvider: () => EffectMetricsRow[]
   private routes = new Map<string, RouteEntry>()
   private cache: VaultApiList | null = null
   private catalogPromise: Promise<VaultApiList> | null = null
@@ -39,9 +42,10 @@ export class SkillRouterManager {
   private catalogGeneration = 0
   private catalogLoadedAt = 0
 
-  constructor(vault: VaultClient, getSessionId: () => string | undefined) {
+  constructor(vault: VaultClient, getSessionId: () => string | undefined, effectProvider?: () => EffectMetricsRow[]) {
     this.vault = vault
     this.getSessionId = getSessionId
+    this.effectProvider = effectProvider || (() => loadEffectMetrics())
   }
 
   async ensureRoute(text: string, sessionId?: string): Promise<RouteDecision> {
@@ -66,7 +70,8 @@ export class SkillRouterManager {
     const route = decision?.route || 'base'
     const scenario = decision?.scenario
     const catalog = await this.getCatalog()
-    const suggested = this.suggestedFor(route, scenario, catalog)
+    const demoted = [...this.demotedIds()]
+    const suggested = this.suggestedFor(route, scenario, catalog, demoted)
     // 可选项为空时不带键：避免 undefined 字段破坏工具输出的 lossless JSON 校验。
     return {
       ...(sid ? { sessionId: sid } : {}),
@@ -75,6 +80,7 @@ export class SkillRouterManager {
       label: routeLabel(route, scenario),
       enabled: catalog.entries.filter((e) => e.enabled).map((e) => e.id),
       suggested,
+      demoted,
       confidence: decision?.confidence || 'none',
     }
   }
@@ -85,7 +91,7 @@ export class SkillRouterManager {
     const r = route || decision?.route || 'base'
     const s = scenario || decision?.scenario
     const catalog = await this.getCatalog()
-    return this.suggestedFor(r, s, catalog)
+    return this.suggestedFor(r, s, catalog, [...this.demotedIds()])
   }
 
   async injectText(sessionId?: string): Promise<{ routeText: string; devSpec?: string }> {
@@ -130,6 +136,16 @@ export class SkillRouterManager {
       for (const id of coreIds) disable.add(id)
     }
 
+    // 效果敏感降级：非底座技能若有足够负面效果证据，当前会话不启用、不推荐。
+    const demoted = this.demotedIds()
+    for (const id of demoted) {
+      const row = catalog.entries.find((e) => e.id === id)
+      if (!row) continue
+      if (row.routing === 'base' || row.activation === 'always-on') continue
+      enable.delete(id)
+      disable.add(id)
+    }
+
     // session-scope 只影响当前会话；base 已在全局启用，这里显式 enable 无害。
     await this.vault.route([...enable], [...disable], 'session')
 
@@ -137,6 +153,11 @@ export class SkillRouterManager {
       this.setRoute(sessionId, decision)
     }
     this.invalidateCatalog()
+  }
+
+  /** Skills currently demoted by the effect sensor (negative evidence). */
+  private demotedIds(): Set<string> {
+    return demotedSkillIds(this.effectProvider())
   }
 
   /** One-time reset to base-only global enabled state. */
@@ -195,17 +216,19 @@ export class SkillRouterManager {
     this.routes.set(sid, { decision, at: Date.now() })
   }
 
-  private suggestedFor(route: RouterRoute, scenario: string | undefined, catalog: VaultApiList): string[] {
+  private suggestedFor(route: RouterRoute, scenario: string | undefined, catalog: VaultApiList, demoted: string[] = []): string[] {
+    const demotedSet = new Set(demoted)
+    const notDemoted = (e: VaultApiList['entries'][number]) => !demotedSet.has(e.id)
     if (route === 'core') {
-      return catalog.entries.filter((e) => e.routing === 'core').map((e) => e.title)
+      return catalog.entries.filter((e) => e.routing === 'core' && notDemoted(e)).map((e) => e.title)
     }
     if (route === 'domain' && scenario) {
-      return catalog.entries.filter((e) => e.scenario === scenario).map((e) => e.title)
+      return catalog.entries.filter((e) => e.scenario === scenario && notDemoted(e)).map((e) => e.title)
     }
     if (route === 'dev') {
       return ['工作共识（深模块优先）', 'DSH 运维底线', '开发强流程（内置）']
     }
-    return catalog.entries.filter((e) => e.routing === 'base').map((e) => e.title)
+    return catalog.entries.filter((e) => e.routing === 'base' && notDemoted(e)).map((e) => e.title)
   }
 }
 

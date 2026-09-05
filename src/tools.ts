@@ -16,13 +16,14 @@ export function registerTools(ctx: Context, manager: SkillRouterManager): void {
     output: {
       schema: { type: 'json' },
       render: (_args, value) => {
-        const v = value as { route: string; label: string; enabled: string[]; suggested: string[]; confidence: string }
+        const v = value as { route: string; label: string; enabled: string[]; suggested: string[]; demoted?: string[]; confidence: string }
         return [{
           type: 'text',
           text: [
             `当前路由：${v.label}`,
             `已启用：${v.enabled.join(', ') || '（仅底座）'}`,
             `推荐调用：${v.suggested.join(', ') || '无'}`,
+            `效果降权：${v.demoted?.length ? v.demoted.join(', ') : '无'}`,
             `置信度：${v.confidence}`,
           ].join('\n'),
         }]

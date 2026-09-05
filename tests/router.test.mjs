@@ -118,3 +118,53 @@ test('disposeSession removes the session route', async () => {
   const status = await m.status('sid-dispose')
   assert.equal(status.route, 'base')
 })
+
+function effectRow(skill, total, pos, triggered, used) {
+  return {
+    skill,
+    total,
+    triggered,
+    used,
+    pos,
+    neu: 0,
+    neg: total - pos,
+    effectRate: total ? pos / total : 0,
+    misuseRate: triggered ? Math.max(0, (triggered - used) / triggered) : 0,
+    lastAt: null,
+  }
+}
+
+test('suggested excludes demoted skills', async () => {
+  const vault = fakeVault(entries)
+  const m = new SkillRouterManager(vault, () => 'sid-eff-1', () => [
+    effectRow('teacher-consensus', 5, 1, 5, 1), // effect 20%, misuse 80%
+  ])
+  await m.switch('domain', 'teaching')
+  const status = await m.status('sid-eff-1')
+  assert.ok(!status.suggested.includes('教师'))
+  assert.ok(status.demoted.includes('teacher-consensus'))
+})
+
+test('applyDecision disables demoted domain skill in session', async () => {
+  const vault = fakeVault(entries)
+  const m = new SkillRouterManager(vault, () => 'sid-eff-2', () => [
+    effectRow('teacher-consensus', 5, 1, 5, 1),
+  ])
+  await m.switch('domain', 'teaching')
+  const call = vault.calls.at(-1)
+  assert.ok(call.disable.includes('teacher-consensus'))
+  assert.ok(call.disable.includes('core-iteration'))
+  assert.ok(call.enable.includes('teaching'))
+})
+
+test('base skills are never demoted by effect signal', async () => {
+  const vault = fakeVault(entries)
+  const m = new SkillRouterManager(vault, () => 'sid-eff-3', () => [
+    effectRow('search-source', 5, 1, 5, 1),
+  ])
+  await m.switch('base')
+  const call = vault.calls.at(-1)
+  assert.ok(!call.disable.includes('search-source'))
+  const status = await m.status('sid-eff-3')
+  assert.ok(status.demoted.includes('search-source'))
+})
