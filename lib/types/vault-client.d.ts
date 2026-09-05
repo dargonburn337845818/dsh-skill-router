@@ -3,6 +3,9 @@
  *
  * 只通过 HTTP 调用 vault 的公开端点，不直接读写 vault 文件/状态，
  * 保持两个插件松耦合（用户已确认“调度器走 vault 公开 API”）。
+ *
+ * 本客户端带“基底发现”：explicit config > DSH_WEB_URL > 常见本地端口，
+ * 第一次请求失败时会自动尝试下一个候选，直到找到可用的 vault API。
  */
 export interface VaultApiRow {
     id: string;
@@ -70,6 +73,7 @@ export interface VaultTeacherStatus {
 }
 export declare class VaultClient {
     private base;
+    private candidates;
     constructor(base?: string);
     list(): Promise<VaultApiList>;
     route(enable: string[], disable: string[], scope?: 'session' | 'global'): Promise<{
@@ -80,4 +84,5 @@ export declare class VaultClient {
         ok: boolean;
     }>;
     teacherStatus(sessionId?: string): Promise<VaultTeacherStatus>;
+    private requestJson;
 }

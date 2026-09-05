@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-skill-router",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "DSH 技能路由与工作流约束：自动按任务路由技能簇、用户可覆盖、向导式清爽技能选择界面、开发规范与路径手册注入。",
   "private": true,
   "type": "module",

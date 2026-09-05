@@ -3,6 +3,9 @@
  *
  * 只通过 HTTP 调用 vault 的公开端点，不直接读写 vault 文件/状态，
  * 保持两个插件松耦合（用户已确认“调度器走 vault 公开 API”）。
+ *
+ * 本客户端带“基底发现”：explicit config > DSH_WEB_URL > 常见本地端口，
+ * 第一次请求失败时会自动尝试下一个候选，直到找到可用的 vault API。
  */
 
 export interface VaultApiRow {
@@ -63,46 +66,76 @@ export interface VaultTeacherStatus {
   current: VaultTeacherSession | null
 }
 
+const FALLBACK_BASES = [
+  'http://127.0.0.1:3080',
+  'http://127.0.0.1:3082',
+  'http://localhost:3080',
+  'http://localhost:3082',
+]
+
+function candidateBases(explicit?: string): string[] {
+  const list: string[] = []
+  const push = (u?: string) => {
+    const v = (u || '').trim().replace(/\/+$/, '')
+    if (v && !list.includes(v)) list.push(v)
+  }
+  push(explicit)
+  push(process.env.DSH_WEB_URL)
+  for (const u of FALLBACK_BASES) push(u)
+  return list
+}
+
 export class VaultClient {
   private base: string
+  private candidates: string[]
 
   constructor(base?: string) {
-    this.base = (base || process.env.DSH_WEB_URL || 'http://127.0.0.1:3080').replace(/\/+$/, '')
+    this.candidates = candidateBases(base)
+    this.base = this.candidates[0] || ''
   }
 
   async list(): Promise<VaultApiList> {
-    const res = await fetch(`${this.base}/skill-vault/api/list`)
-    if (!res.ok) throw new Error(`vault list failed: ${res.status}`)
-    const data = await res.json() as { entries: VaultApiRow[]; scenarios: VaultApiList['scenarios'] }
+    const data = await this.requestJson<{ entries: VaultApiRow[]; scenarios: VaultApiList['scenarios'] }>('/skill-vault/api/list')
     return { entries: data.entries || [], scenarios: data.scenarios || [] }
   }
 
   async route(enable: string[], disable: string[], scope: 'session' | 'global' = 'session'): Promise<{ ok: boolean; results: unknown[] }> {
-    const res = await fetch(`${this.base}/skill-vault/api/route`, {
+    const data = await this.requestJson<{ ok: boolean; results: unknown[] }>('/skill-vault/api/route', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ enable, disable, scope }),
     })
-    const data = await res.json() as { ok: boolean; results: unknown[] }
     return { ok: !!data.ok, results: data.results || [] }
   }
 
   async resetBase(baseIds?: string[]): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.base}/skill-vault/api/reset-base`, {
+    const data = await this.requestJson<{ ok: boolean }>('/skill-vault/api/reset-base', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ baseIds }),
     })
-    const data = await res.json() as { ok: boolean }
     return { ok: !!data.ok }
   }
 
   async teacherStatus(sessionId?: string): Promise<VaultTeacherStatus> {
     const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
-    const res = await fetch(`${this.base}/skill-vault/api/teacher/status${query}`, {
+    return await this.requestJson<VaultTeacherStatus>(`/skill-vault/api/teacher/status${query}`, {
       headers: { 'accept': 'application/json' },
     })
-    if (!res.ok) throw new Error(`vault teacher status failed: ${res.status}`)
-    return await res.json() as VaultTeacherStatus
+  }
+
+  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const candidates = this.candidates.length ? this.candidates : [this.base]
+    const errors: string[] = []
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(`${candidate}${path}`, init)
+        if (!res.ok) throw new Error(`${path} failed: ${res.status}`)
+        return await res.json() as T
+      } catch (e) {
+        errors.push(`${candidate} -> ${String(e)}`)
+      }
+    }
+    throw new Error(`vault api unreachable (${errors.join('; ')})`)
   }
 }
