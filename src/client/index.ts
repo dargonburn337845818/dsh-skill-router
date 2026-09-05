@@ -993,6 +993,17 @@ const AI_FLOW_CSS = `
   gap: 8px;
   align-items: center;
 }
+.ai-blackbox-flow .ai-gen-center {
+  text-align: center;
+}
+.ai-blackbox-flow .ai-gen-actions.center {
+  justify-content: center;
+}
+.ai-blackbox-flow .ai-gen-main {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+}
 .ai-blackbox-flow .ai-gen-error {
   margin-top: 8px;
   color: var(--dsw-alias-state-danger-primary, #dc2626);
@@ -2064,10 +2075,7 @@ function AiBlackboxFlow(props: any): any {
   const useTrajectory = props.useTrajectory
   const [status, setStatus] = useState<any>(null)
   const [genState, setGenState] = useState<'idle' | 'busy' | 'error'>('idle')
-  const [lastUrl, setLastUrl] = useState('')
   const [genError, setGenError] = useState('')
-  const [zoom, setZoom] = useState(1)
-  const iframeRef = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -2107,9 +2115,7 @@ function AiBlackboxFlow(props: any): any {
       if (!data.ok) throw new Error(data?.detail || data?.error || '生成失败')
       const dark = document.documentElement.classList.contains('dark')
         || document.documentElement.getAttribute('data-theme') === 'dark'
-      const url = `${data.url}?theme=${dark ? 'dark' : 'light'}`
-      setLastUrl(url)
-      setZoom(1)
+      window.open(`${data.url}?theme=${dark ? 'dark' : 'light'}`, '_blank')
       setGenState('idle')
     } catch (e: any) {
       setGenError(String(e?.message ?? e))
@@ -2123,24 +2129,19 @@ function AiBlackboxFlow(props: any): any {
       createElement('div', { className: 'ai-flow-title' }, ['流程图']),
       createElement('div', { className: 'ai-flow-sub' }, [
         createElement('span', { className: 'ai-flow-tag' }, [currentLabel]),
-        summary.suggested[0]
-          ? createElement('span', { className: 'ai-flow-hint' }, [`推荐：${summary.suggested[0]}`])
-          : null,
-        createElement('span', { className: 'ai-flow-hint' }, ['会话完成后生成完整图']),
+        createElement('span', { className: 'ai-flow-hint' }, ['会话结束后生成完整 Archify 图']),
       ]),
     ]),
-    createElement('div', { className: 'ai-flow-empty' }, ['下方生成的是 Archify 原生可缩放完整图，不再显示本地缩略图。']),
-    createElement('div', { className: 'ai-gen-card' }, [
-      createElement('div', { className: 'ai-gen-title' }, ['Archify 完整图']),
-      summary.running.length === 0 && summary.totalTools > 0
-        ? createElement('div', { className: 'ai-gen-hint' }, ['会话已结束，可以生成完整流程图'])
-        : createElement('div', { className: 'ai-gen-hint' }, ['会话结束后生成一张可缩放的 Archify 完整图']),
-      createElement('div', { className: 'ai-gen-actions' }, [
-        lastUrl
-          ? createElement('a', { href: lastUrl, target: '_blank', className: 'ai-stage-link' }, ['新窗口打开'])
-          : null,
+    createElement('div', { className: 'ai-gen-card ai-gen-center' }, [
+      createElement('div', { className: 'ai-gen-title' }, ['生成 Archify 完整流程图']),
+      createElement('div', { className: 'ai-gen-hint' }, [
+        summary.running.length === 0 && summary.totalTools > 0
+          ? '会话已完成，可以生成完整流程图'
+          : '点击按钮后自动生成并跳转到 Archify 原生图',
+      ]),
+      createElement('div', { className: 'ai-gen-actions center' }, [
         createElement('button', {
-          className: 'ai-stage-close',
+          className: 'ai-stage-close ai-gen-main',
           disabled: genState === 'busy',
           onClick: () => void generate(),
         }, [genState === 'busy' ? '生成中…' : '生成 Archify 完整图']),
@@ -2149,37 +2150,6 @@ function AiBlackboxFlow(props: any): any {
         ? createElement('div', { className: 'ai-gen-error' }, [genError])
         : null,
     ]),
-    lastUrl
-      ? createElement('div', { className: 'ai-viewer-wrap' }, [
-          createElement('div', { className: 'ai-viewer-toolbar' }, [
-            createElement('span', { className: 'ai-viewer-label' }, ['缩放']),
-            createElement('input', {
-              type: 'range',
-              min: '0.5',
-              max: '3',
-              step: '0.1',
-              value: String(zoom),
-              onChange: (ev: any) => setZoom(Number(ev.target.value)),
-              className: 'ai-viewer-slider',
-            }),
-            createElement('span', { className: 'ai-viewer-label' }, [`${Math.round(zoom * 100)}%`]),
-          ]),
-          createElement('div', { className: 'ai-viewer-frame' }, [
-            createElement('iframe', {
-              ref: iframeRef,
-              src: lastUrl,
-              style: {
-                width: '100%',
-                height: '620px',
-                border: 'none',
-                background: 'var(--dsw-alias-bg-base, #fff)',
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top left',
-              },
-            }),
-          ]),
-        ])
-      : null,
   ])
 }
 
