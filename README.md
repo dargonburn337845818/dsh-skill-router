@@ -2,6 +2,8 @@
 
 > DSH 技能路由与工作流约束插件：按任务自动路由技能簇，提供用户可覆盖的向导界面，并在开发/重构时注入开发规范。
 
+**中文** | [English](README.en.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## 简介
