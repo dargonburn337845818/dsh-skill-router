@@ -19,7 +19,7 @@ export interface RouterStatus {
     demoted: string[];
     confidence: string;
 }
-export declare const DOMAIN_SCENARIOS: readonly ['teaching', 'learning', 'research', 'github', 'dsh-ops', 'writing'];
+export declare const DOMAIN_SCENARIOS: readonly ["teaching", "learning", "research", "github", "dsh-ops", "writing"];
 export declare class SkillRouterManager {
     private vault;
     private getSessionId;
