@@ -11,7 +11,6 @@
  * 运维边界：本插件不热更运行中 agent；安装/升级走 dsh-optimization-consensus 隔离冒烟。
  */
 import type { Context } from 'cordis';
-import z from 'schemastery';
 type AppContext = Context & {
     tools: unknown;
     get(name: string): unknown;
@@ -22,12 +21,6 @@ export interface Config {
     vaultBaseUrl: string;
     resetOnStart: boolean;
 }
-export declare const Config: z<Schemastery.ObjectS<{
-    vaultBaseUrl: z<string, string>;
-    resetOnStart: z<boolean, boolean>;
-}>, Schemastery.ObjectT<{
-    vaultBaseUrl: z<string, string>;
-    resetOnStart: z<boolean, boolean>;
-}>>;
+export declare const Config: any;
 export declare function apply(ctx: AppContext, config: Config): void;
 export {};
